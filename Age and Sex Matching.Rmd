@@ -1,0 +1,199 @@
+---
+title: "Age and Sex Matching Between Familial and Sporadic Groups"
+author: "TCHAKONDO Samadou"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+    highlight: tango
+  word_document: default
+  pdf_document:
+    latex_engine: xelatex
+
+---
+# **Background**
+
+Observational data often contain inherent differences between comparison groups because subjects are not assigned through randomization. Such baseline imbalances can introduce confounding, making direct comparisons unreliable if not properly controlled. Propensity score methods provide a statistical approach to address this issue by estimating the probability of group membership based on observed characteristics and creating balanced samples with similar covariate distributions.
+
+Propensity score matching (PSM) is widely used to emulate key features of randomized study designs in real-world datasets. By pairing individuals with comparable propensity scores, PSM reduces bias attributable to measured variables and enables more valid group comparisons. Nearest-neighbour matching is one of the most commonly applied algorithms due to its simplicity, transparency, and effectiveness in achieving covariate balance.
+
+In this analysis, Familial and Sporadic individuals originated from highly unequal sample sizes, necessitating adjustment prior to further investigation. Therefore, age- and sex-based propensity score matching was implemented to construct comparable groups and ensure that downstream analyses are not driven by demographic imbalance.
+
+
+
+# **Data and Study Design**
+
+This analysis used an observational dataset comparing individuals classified as Familial and Sporadic. 
+Because group assignment was not randomized, propensity score matching based on age and sex was applied to reduce baseline differences and construct comparable groups prior to further analysis.
+
+The dataset (n = 5,936) included a unique identifier (MRNO), age (years), sex (Gender_code), and group classification (dataset_code).
+
+
+
+# **Objective of analysis**
+
+The aim of this analysis was to construct age- and sex-balanced comparison groups between Familial and Sporadic individuals prior to downstream analyses.
+
+
+
+# **Load Required Libraries**
+```{r load-packages, message=FALSE, warning=FALSE}
+library(haven)      # Import and reads SPSS data
+library(dplyr)      # Data cleaning & manipulation
+library(tableone)   # Baseline comparison tables (SMD) or Balance checking
+library(MatchIt)    # Performs propensity score matching
+```
+
+
+# **Data Import and Initial Inspection**
+```{r}
+# Import dataset 
+data = read_sav("data/multiplex_18022026.sav") 
+# Preview the first rows of the dataset
+head(data)
+
+# Check structure (variable types) 
+str(data) 
+
+# Check missing in each variable
+colSums(is.na(data))
+
+```
+
+
+# **Data Cleaning**
+
+Exclusion of missing genders and formatting of variables.
+```{r data-cleaning}
+data_clean <- data %>%
+  filter(!is.na(Gender_code)) %>%
+  mutate(
+    dataset_code = factor(dataset_code, levels = c(0,1),
+                          labels = c("Sporadic","Familial")),
+    Gender_code  = factor(Gender_code, levels = c(0,1),
+                          labels = c("Female","Male"))
+  )
+
+# Check missingness after
+colSums(is.na(data_clean))
+```
+Records with missing sex information (n = 4) are excluded prior to matching because propensity score estimation requires complete covariate information. No missing data were observed for age or group classification.
+
+
+
+# **Describe Data Before Matching**
+
+Standardized mean differences (SMD) are used instead of hypothesis testing because balance diagnostics, rather than statistical significance, are recommended for evaluating propensity score matching performance.
+```{r before-matching-table}
+vars <- c("Age", "Gender_code")
+
+table_before <- CreateTableOne(vars = vars,
+                               strata = "dataset_code",
+                               data = data_clean,
+                               test = FALSE)
+
+print(table_before, smd = TRUE)
+```
+Baseline comparability between familial and sporadic groups is assessed using standardized mean differences (SMD). An SMD greater than 0.10 is considered indicative of meaningful imbalance. Prior to matching, age shows evidence of imbalance (SMD = 0.195), while sex is already well balanced (SMD = 0.022).
+
+
+
+
+# **Perform Propensity Score Matching (Age + Sex)**
+
+Age- and sex-matched analysis between familial and sporadic groups was performed using 1:1 nearest-neighbour propensity score matching without replacement. This approach pairs each treated subject with the control subject whose propensity score is closest, ensuring that each control is used at most once. 
+
+In the matching framework, the familial group is treated as the reference (treated) group and matched to sporadic individuals (controls).
+
+```{r matching}
+set.seed(2026)
+
+match_model <- matchit(dataset_code ~ Age + Gender_code,
+                       data = data_clean,
+                       method = "nearest",
+                       ratio = 1,
+                       replace = FALSE)
+```
+
+
+# **Extract Matched Dataset**
+```{r extract-matched}
+matched_data <- match.data(match_model)
+
+table(matched_data$dataset_code)
+```
+
+
+# **Assessment of Matching Quality**
+```{r matching-diagnostics}
+summary(match_model)
+```
+Matching quality is evaluated using standardized mean differences before and after matching. An SMD < 0.10 was considered evidence of adequate covariate balance. After matching, standardized mean differences for both age and sex were reduced to approximately zero, demonstrating successful covariate balance.
+
+
+
+# **Final Matched Sample**
+
+We check that equilibrium has been reached
+```{r after-matching-table}
+table_after <- CreateTableOne(vars = vars,
+                              strata = "dataset_code",
+                              data = matched_data,
+                              test = FALSE)
+
+print(table_after, smd = TRUE)
+```
+The matching procedure produced 87 matched pairs (n = 174 individuals). Unmatched sporadic individuals were excluded from subsequent analyses, as propensity score matching constructs an analytical sample restricted to comparable subjects.
+
+
+
+# **Visual Assessment of Matching**
+
+This graph serves to answer a single scientific question:
+Are the Familial and Sporadic groups comparable after matching?
+```{r love-plot}
+plot(summary(match_model), var.order = "unmatched")
+```
+Covariate balance improved substantially after matching, with all standardized mean differences reduced to approximately zero, indicating successful alignment of age and sex distributions between groups.
+
+
+
+# **Export Final Matched Dataset**
+```{r export}
+write_sav(matched_data, "output/Age_Sex_Matched_Dataset.sav")
+```
+
+
+
+# **Conclusion**
+
+Propensity score matching successfully constructed age- and sex-balanced comparison groups between Familial and Sporadic individuals. The matching procedure reduced baseline imbalance to negligible levels, producing a well-aligned analytical cohort suitable for valid downstream analyses. This reproducible workflow demonstrates how propensity score methods can be applied to transform observational data into a comparable framework for unbiased investigation.
+
+
+
+# **References**
+
+1. Rosenbaum PR, Rubin DB.
+The central role of the propensity score in observational studies for causal effects.
+Biometrika. 1983;70(1):41-55.
+
+2. Rosenbaum PR, Rubin DB.
+Constructing a control group using multivariate matched sampling methods that incorporate the propensity score.
+Am Stat. 1985;39(1):33-38.
+
+3. Austin PC.
+An introduction to propensity score methods for reducing the effects of confounding in observational studies.
+Multivariate Behav Res. 2011;46(3):399-424.
+
+4. Austin PC.
+A comparison of 12 algorithms for matching on the propensity score.
+Stat Med. 2014;33(6):1057-1069. 
+
+5. Austin PC.
+Balance diagnostics for comparing the distribution of baseline covariates between treatment groups in propensity-score matched samples.
+Stat Med. 2009;28(25):3083-3107.
+
